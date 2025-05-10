@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Restaurants{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mb-4">Choose a Restaurant</h1>
+    <div class="row">
+        {% for restaurant in restaurants %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                {% if restaurant.logo_path %}
+                <img src="{{ restaurant.logo_path.url }}" class="card-img-top" alt="{{ restaurant.name }}">
+                {% endif %}
+                <div class="card-body">
+                    <h5 class="card-title">{{ restaurant.name }}</h5>
+                    <p class="card-text">{{ restaurant.description }}</p>
+                    <a href="{% url 'core:restaurant_menu' restaurant_id=restaurant.id %}" class="btn btn-primary">View Menu</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ restaurant.name }} Menu{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <h1>{{ restaurant.name }}</h1>
+            <p class="lead">{{ restaurant.description }}</p>
+        </div>
+    </div>
+
+    <div class="row">
+        {% for item in menu_items %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                {% if item.image_path %}
+                <img src="{{ item.image_path.url }}" class="card-img-top" alt="{{ item.name }}">
+                {% endif %}
+                <div class="card-body">
+                    <h5 class="card-title">{{ item.name }}</h5>
+                    <p class="card-text">{{ item.description }}</p>
+                    <p class="card-text"><strong>${{ item.price|floatformat:2 }}</strong></p>
+                    {% if user.is_authenticated %}
+                    <form action="{% url 'core:add_to_cart' %}" method="POST">
+                        {% csrf_token %}
+                        <input type="hidden" name="menu_item_id" value="{{ item.id }}">
+                        <div class="input-group mb-3">
+                            <input type="number" name="quantity" class="form-control" min="1" max="10" value="1">
+                            <button type="submit" class="btn btn-primary">Add to Cart</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <a href="{% url 'core:login' %}" class="btn btn-primary">Login to Order</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if user.is_authenticated %}
+    <div class="row mt-4 mb-5">
+        <div class="col text-center">
+            <a href="{% url 'core:cart' %}" class="btn btn-success btn-lg">
+                <i class="bi bi-cart-check"></i> Proceed to Checkout
+            </a>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

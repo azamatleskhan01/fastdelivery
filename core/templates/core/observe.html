@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+{% endblock %}
+
+{% block extra_js %}
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        var map = L.map('map').setView([43.1965135, 76.6309754], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        var userMarker;
+        var droneMarker;
+        var routeLine;
+
+        var droneIcon = L.icon({
+            iconUrl: '{% static "images/drone_PNG133.png" %}',
+            iconSize: [50, 50]
+        });
+
+        function updateDrone() {
+            $.get('{% url "core:get_positions" %}', function(data) {
+                if (data.length > 0) {
+                    var drone = data[0];
+                    var latLng = [drone.gps[0], drone.gps[1]];
+                    if (droneMarker) {
+                        droneMarker.setLatLng(latLng).getPopup().setContent(`
+                            <b>Дрон ID:</b> ${drone.id}<br>
+                            <b>Батарея:</b> ${drone.battery}%<br>
+                            <b>Погода:</b> ${drone.weather}<br>
+                            <b>Температура:</b> ${drone.temp}°C<br>
+                            <b>Влажность:</b> ${drone.humidity}%<br>
+                            <b>Скорость ветра:</b> ${drone.wind_speed} м/с
+                        `);
+                    } else {
+                        droneMarker = L.marker(latLng, { icon: droneIcon }).addTo(map).bindPopup(`
+                            <b>Дрон ID:</b> ${drone.id}<br>
+                            <b>Батарея:</b> ${drone.battery}%<br>
+                            <b>Погода:</b> ${drone.weather}<br>
+                            <b>Температура:</b> ${drone.temp}°C<br>
+                            <b>Влажность:</b> ${drone.humidity}%<br>
+                            <b>Скорость ветра:</b> ${drone_speed} м/с
+                        `).openPopup();
+                    }
+
+                    if (userMarker && routeLine) {
+                        routeLine.setLatLngs([latLng, userMarker.getLatLng()]);
+                    }
+                }
+            });
+        }
+
+        map.on('click', function(e) {
+            const latitude = e.latlng.lat;
+            const longitude = e.latlng.lng;
+
+            if (userMarker) {
+                userMarker.setLatLng([latitude, longitude]);
+            } else {
+                userMarker = L.marker([latitude, longitude]).addTo(map).bindPopup("Ваше местоположение").openPopup();
+            }
+
+            if (droneMarker) {
+                const droneLatLng = droneMarker.getLatLng();
+                const userLatLng = [latitude, longitude];
+
+                if (routeLine) {
+                    routeLine.setLatLngs([droneLatLng, userLatLng]);
+                } else {
+                    routeLine = L.polyline([droneLatLng, userLatLng], { color: 'blue' }).addTo(map);
+                }
+            }
+
+            $.post('{% url "core:calculate_eta" %}', { lat: latitude, lon: longitude }, function(response) {
+                if (response.error) {
+                    alert(response.error);
+                } else {
+                    if (confirm(`Время прибытия дрона: ${response.eta.toFixed(2)} минут. Запустить дрон?`)) {
+                        $.post('{% url "core:start_drone" %}', { lat: latitude, lon: longitude })
+                            .done(function(response) {
+                                if (response.error) {
+                                    alert(response.error);
+                                    L.popup().setLatLng([latitude, longitude])
+                                        .setContent("Дрон временно не может принять заказ: низкий заряд батареи.")
+                                        .openOn(map);
+                                } else {
+                                    alert('Дрон запущен.');
+                                }
+                            });
+                    }
+                }
+            });
+        });
+
+        setInterval(updateDrone, 10000);
+        updateDrone();
+    </script>
+{% endblock %}

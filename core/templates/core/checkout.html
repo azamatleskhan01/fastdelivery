@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% load static %}  {# Load the static tag #}
+{% load core_extras %}
+
+{% block title %}Checkout{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+<style>
+    #map {
+        height: 400px;
+        width: 100%;
+        border-radius: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mb-4">Checkout</h1>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Delivery Location</h5>
+                    <p class="card-text">Select your delivery location on the map:</p>
+                    <div id="map"></div>
+                    <form method="POST" class="mt-3">
+                        {% csrf_token %}
+                        {{ form.delivery_latitude }}
+                        {{ form.delivery_longitude }}
+                        <button type="submit" class="btn btn-primary">Place Order</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Order Summary</h5>
+                    <div class="list-group list-group-flush">
+                        {% for item in cart_items %}
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">{{ item.menu_item.name }}</h6>
+                                    <small class="text-muted">Qty: {{ item.quantity }}</small>
+                                </div>
+                                <span>${{ item.subtotal|floatformat:2 }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <hr>
+                    <div class="d-flex justify-content-between">
+                        <strong>Total:</strong>
+                        <strong>${{ total|floatformat:2 }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    // Get CSRF token from cookie
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    // Initialize the map
+    var map = L.map('map').setView([43.1965135, 76.6309754], 13);
+    var marker = null;
+    var routeLine = null;
+    var currentOrderId = null;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    var droneMarker;
+    var latInput = document.getElementById('id_delivery_latitude');
+    var lonInput = document.getElementById('id_delivery_longitude');
+
+    // Drone icon
+    var droneIcon = L.icon({
+        iconUrl: "{% static 'images/drone.png' %}",
+        iconSize: [50, 50],
+        iconAnchor: [25, 25]
+    });
+
+    // Initialize drone at starting position
+    droneMarker = L.marker([43.1965135, 76.6309754], { icon: droneIcon }).addTo(map).bindPopup(`
+        <b>Drone Status:</b> Ready for delivery<br>
+        <b>Battery:</b> 100%<br>
+        <b>Weather:</b> Clear<br>
+        <b>Temperature:</b> 22°C
+    `).openPopup();
+
+    // Функция для расчета расстояния между точками в метрах
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3; // Радиус Земли в метрах
+        const φ1 = lat1 * Math.PI/180;
+        const φ2 = lat2 * Math.PI/180;
+        const Δφ = (lat2-lat1) * Math.PI/180;
+        const Δλ = (lon2-lon1) * Math.PI/180;
+
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+        return R * c;
+    }
+
+    // Handle map click
+    map.on('click', function(e) {
+        if (marker) {
+            map.removeLayer(marker);
+        }
+        marker = L.marker(e.latlng).addTo(map).bindPopup("Delivery Location").openPopup();
+        latInput.value = e.latlng.lat;
+        lonInput.value = e.latlng.lng;
+
+        // Draw line between drone and delivery point
+        if (routeLine) {
+            map.removeLayer(routeLine);
+        }
+        routeLine = L.polyline([droneMarker.getLatLng(), e.latlng], { color: 'blue' }).addTo(map);
+
+        // Calculate and show ETA
+        var distance = calculateDistance(
+            droneMarker.getLatLng().lat, droneMarker.getLatLng().lng,
+            e.latlng.lat, e.latlng.lng
+        );
+        var eta = (distance / 20) / 60; // 20 м/с = 72 км/ч, переводим в минуты
+        eta = Math.max(1, Math.round(eta * 10) / 10); // Минимум 1 минута, округляем до десятых
+
+        if (confirm(`Estimated delivery time: ${eta} minutes. Proceed with delivery?`)) {
+            // Create order
+            $.ajax({
+                url: '{% url "core:create_order" %}',
+                type: 'POST',
+                data: {
+                    lat: e.latlng.lat,
+                    lon: e.latlng.lng
+                },
+                headers: {
+                    'X-CSRFToken': csrftoken
+                },
+                success: function(response) {
+                    if (response.error) {
+                        alert(response.error);
+                    } else {
+                        currentOrderId = response.order_id;
+                        console.log('Order ID:', currentOrderId);
+                        // Start drone after successful order creation
+                        $.ajax({
+                            url: '{% url "core:start_drone" %}',
+                            type: 'POST',
+                            data: {
+                                lat: e.latlng.lat,
+                                lon: e.latlng.lng,
+                                order_id: response.order_id
+                            },
+                            headers: {
+                                'X-CSRFToken': csrftoken
+                            },
+                            success: function(response) {
+                                if (response.error) {
+                                    alert(response.error);
+                                } else {
+                                    alert('Drone is on its way!');
+                                    moveDrone(e.latlng);
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    function moveDrone(destination) {
+        var startLatLng = droneMarker.getLatLng();
+        var distance = calculateDistance(
+            startLatLng.lat, startLatLng.lng,
+            destination.lat, destination.lng
+        );
+
+        // Увеличиваем скорость дрона до 20 м/с (72 км/ч)
+        const droneSpeed = 20;
+        // Время в секундах для преодоления расстояния
+        const totalTime = distance / droneSpeed;
+        // Количество шагов анимации (1 шаг каждые 100мс)
+        const steps = Math.ceil(totalTime * 10);
+
+        var currentStep = 0;
+
+        var moveInterval = setInterval(function() {
+            if (currentStep >= steps) {
+                clearInterval(moveInterval);
+                // Ask to lower goods
+                if (confirm('Drone has arrived! Lower the goods?')) {
+                    alert('Goods are being lowered. Please confirm when you have received them.');
+                    // Wait for confirmation
+                    setTimeout(function() {
+                        if (confirm('Have you received the goods?')) {
+                            alert('Thank you! Drone is returning to base.');
+                            // Отмечаем доставку как завершенную
+                            $.post('{% url "core:complete_delivery" %}', { order_id: currentOrderId })  {# Used url tag #}
+                                .done(function(response) {
+                                    if (response.error) {
+                                        alert(response.error);
+                                    } else {
+                                        // Return drone to base
+                                        returnDrone();
+                                    }
+                                })
+                                .fail(function() {
+                                    alert('Error completing delivery. Please try again.');
+                                });
+                        } else {
+                            alert('Warning: You have 10 minutes to receive the goods. After that, the drone will return without delivery.');
+                            setTimeout(function() {
+                                alert('Time is up! Drone is returning to base without delivery.');
+                                returnDrone();
+                            }, 600000); // 10 minutes
+                        }
+                    }, 5000);
+                } else {
+                    alert('Drone is returning to base without delivery.');
+                    returnDrone();
+                }
+                return;
+            }
+
+            currentStep++;
+            var progress = currentStep / steps;
+            var newLat = startLatLng.lat + (destination.lat - startLatLng.lat) * progress;
+            var newLng = startLatLng.lng + (destination.lng - startLatLng.lng) * progress;
+
+            droneMarker.setLatLng([newLat, newLng]);
+            routeLine.setLatLngs([droneMarker.getLatLng(), destination]);
+
+            // Обновляем информацию о дроне
+            var remainingDistance = distance * (1 - progress);
+            var remainingTime = remainingDistance / droneSpeed;
+            var batteryLevel = Math.max(20, 100 - (progress * 30));
+
+            droneMarker.setPopupContent(`
+                <b>Drone Status:</b> In transit<br>
+                <b>Distance to destination:</b> ${Math.round(remainingDistance)}m<br>
+                <b>Estimated time remaining:</b> ${Math.round(remainingTime)}s<br>
+                <b>Battery:</b> ${Math.round(batteryLevel)}%<br>
+                <b>Speed:</b> ${droneSpeed} m/s
+            `);
+        }, 100);
+    }
+
+    function returnDrone() {
+        var startLatLng = droneMarker.getLatLng();
+        var baseLatLng = L.latLng(43.1965135, 76.6309754);
+        var distance = calculateDistance(
+            startLatLng.lat, startLatLng.lng,
+            baseLatLng.lat, baseLatLng.lng
+        );
+
+        const droneSpeed = 20; // Такая же скорость как при доставке
+        const totalTime = distance / droneSpeed;
+        const steps = Math.ceil(totalTime * 10);
+        var currentStep = 0;
+
+        var returnInterval = setInterval(function() {
+            if (currentStep >= steps) {
+                clearInterval(returnInterval);
+                alert('Drone has returned to base.');
+                window.location.href = "{% url 'core:orders' %}";  {# Used url tag #}
+                return;
+            }
+
+            currentStep++;
+            var progress = currentStep / steps;
+            var newLat = startLatLng.lat + (baseLatLng.lat - startLatLng.lat) * progress;
+            var newLng = startLatLng.lng + (baseLatLng.lng - startLatLng.lng) * progress;
+
+            droneMarker.setLatLng([newLat, newLng]);
+            routeLine.setLatLngs([droneMarker.getLatLng(), baseLatLng]);
+
+            // Обновляем информацию о дроне
+            var remainingDistance = distance * (1 - progress);
+            var remainingTime = remainingDistance / droneSpeed;
+            var batteryLevel = Math.max(20, 100 - (progress * 30));
+
+            droneMarker.setPopupContent(`
+                <b>Drone Status:</b> Returning to base<br>
+                <b>Distance to base:</b> ${Math.round(remainingDistance)}m<br>
+                <b>Estimated time remaining:</b> ${Math.round(remainingTime)}s<br>
+                <b>Battery:</b> ${Math.round(batteryLevel)}%<br>
+                <b>Speed:</b> ${droneSpeed} m/s
+            `);
+        }, 100);
+    }
+
+    // Try to get user's location
+    if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(function(position) {
+            var lat = position.coords.latitude;
+            var lon = position.coords.longitude;
+            map.setView([lat, lon], 13);
+        });
+    }
+</script>
+{% endblock %}

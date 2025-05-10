@@ -1,0 +1,49 @@
+{% extends "layout.html" %}
+
+{% block title %}Place Order{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <h1 class="text-center">Place Your Order</h1>
+    <form id="order-form" class="mt-4">
+        <div class="mb-3">
+            <label for="first-name" class="form-label">First Name</label>
+            <input type="text" id="first-name" name="firstName" class="form-control" placeholder="Enter your first name" required>
+        </div>
+        <div class="mb-3">
+            <label for="last-name" class="form-label">Last Name</label>
+            <input type="text" id="last-name" name="lastName" class="form-control" placeholder="Enter your last name" required>
+        </div>
+        <div class="mb-3">
+            <label for="phone-number" class="form-label">Phone Number</label>
+            <input type="tel" id="phone-number" name="phoneNumber" class="form-control" placeholder="Enter your phone number" required>
+        </div>
+        <div class="mb-3">
+            <label for="restaurant" class="form-label">Select Restaurant</label>
+            <select id="restaurant" name="restaurant" class="form-select" required>
+                <option value="" disabled selected>Select a restaurant</option>
+                <option value="Salam Bro">Salam Bro</option>
+                <option value="KFC">KFC</option>
+                <option value="YOLO">YOLO</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Submit Order</button>
+    </form>
+    <div id="response-message" class="mt-4"></div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $('#order-form').on('submit', function(e) {
+        e.preventDefault();
+        const orderData = $(this).serialize();
+        $.post('/submit_order', orderData, function(response) {
+            if (response.redirect_url) {
+                window.location.href = response.redirect_url;
+            }
+        }).fail(function() {
+            $('#response-message').html(`<div class="alert alert-danger">Something went wrong. Please try again.</div>`);
+        });
+    });
+</script>
+{% endblock %}
